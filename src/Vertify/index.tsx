@@ -1,80 +1,46 @@
-import React, { useRef, useState, useEffect, ReactNode, memo } from 'react';
-import { getRandomNumberByRange, sum, square } from './tool';
+import React, { ReactNode, memo, useEffect, useRef, useState } from 'react';
 import './index.less';
+import { getRandomNumberByRange, square, sum } from './tool';
 
 interface VertifyType {
   spliced: boolean;
-  verified: boolean; // 简单验证拖动轨迹，为零时表示Y轴上下没有波动，可能非人为操作
-  left: number; // 滑块的移动位置
-  destX: number; // 滑块的目标位置
+  verified: boolean;
+  left: number;
+  destX: number;
 }
 
 interface IVertifyProp {
-  /**
-   * @description   canvas宽度
-   * @default       320
-   */
   width?: number;
-  /**
-   * @description   canvas高度
-   * @default       160
-   */
   height?: number;
-  /**
-   * @description   滑块边长
-   * @default       42
-   */
   l?: number;
-  /**
-   * @description   滑块半径
-   * @default       9
-   */
   r?: number;
-  /**
-   * @description   是否可见
-   * @default       true
-   */
   visible?: boolean;
-  /**
-   * @description   滑块文本
-   * @default       向右滑动填充拼图
-   */
   text?: string | ReactNode;
-  /**
-   * @description   刷新按钮icon, 为icon的url地址
-   * @default       -
-   */
   refreshIcon?: string;
-  /**
-   * @description   用于获取随机图片的url地址
-   * @default       https://picsum.photos/${id}/${width}/${height}, 具体参考https://picsum.photos/, 只需要实现类似接口即可
-   */
   imgUrl?: string;
-  /**
-   * @description   拖拽滑块时的回调, 参数为当前滑块拖拽的距离
-   * @default       (l: number):void => {}
-   */
-  onDraw?: (l: number) => {};
-  /**
-   * @description   用户的自定义验证逻辑
-   * @default       (arg: VertifyType) => VertifyType
-   */
+  onDraw?: (l: number) => void;
   onCustomVertify?: (arg: VertifyType) => VertifyType;
-  /**
-   * @description   验证成功回调
-   * @default       ():void => {}
-   */
   onSuccess?: VoidFunction;
-  /**
-   * @description   验证失败回调
-   * @default       ():void => {}
-   */
   onFail?: VoidFunction;
-  /**
-   * @description   刷新时回调
-   * @default       ():void => {}
-   */
   onRefresh?: VoidFunction;
+
+  /**
+   * @description 图片开始加载时的回调
+   * @default () => {}
+   */
+  onImgLoadStart?: VoidFunction;
+
+  /**
+   * @description 图片加载成功的回调
+   * @default () => {}
+   */
+  onImgLoadSuccess?: VoidFunction;
+
+  /**
+   * @description 图片加载失败的回调（每次失败都会触发，包括重试）
+   * @default () => {}
+   */
+  onImgLoadError?: VoidFunction;
 }
 
 export default memo(
@@ -84,7 +50,7 @@ export default memo(
     l = 42,
     r = 9,
     imgUrl,
-    text,
+    text = '向右滑动填充拼图',
     refreshIcon = 'http://cdn.dooring.cn/dr/icon12.png',
     visible = true,
     onDraw,
@@ -92,14 +58,17 @@ export default memo(
     onSuccess,
     onFail,
     onRefresh,
+    onImgLoadStart,
+    onImgLoadSuccess,
+    onImgLoadError,
   }: IVertifyProp) => {
     const [isLoading, setLoading] = useState(false);
     const [sliderLeft, setSliderLeft] = useState(0);
     const [sliderClass, setSliderClass] = useState('sliderContainer');
     const [textTip, setTextTip] = useState(text);
-    const canvasRef = useRef<any>(null);
-    const blockRef = useRef<any>(null);
-    const imgRef = useRef<any>(null);
+    const canvasRef = useRef<HTMLCanvasElement>(null);
+    const blockRef = useRef<HTMLCanvasElement>(null);
+    const imgRef = useRef<HTMLImageElement | null>(null);
     const isMouseDownRef = useRef<boolean>(false);
     const trailRef = useRef<number[]>([]);
     const originXRef = useRef<number>(0);
@@ -107,13 +76,13 @@ export default memo(
     const xRef = useRef<number>(0);
     const yRef = useRef<number>(0);
     const PI = Math.PI;
-    const L = l + r * 2 + 3; // 滑块实际边长
+    const L = l + r * 2 + 3;
 
     const drawPath = (
-      ctx: any,
+      ctx: CanvasRenderingContext2D,
       x: number,
       y: number,
-      operation: 'fill' | 'clip',
+      operation: 'fill' | 'clip'
     ) => {
       ctx.beginPath();
       ctx.moveTo(x, y);
@@ -129,7 +98,11 @@ export default memo(
       ctx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
       ctx.stroke();
       ctx.globalCompositeOperation = 'destination-over';
-      operation === 'fill' ? ctx.fill() : ctx.clip();
+      if (operation === 'fill') {
+        ctx.fill();
+      } else {
+        ctx.clip();
+      }
     };
 
     const getRandomImgSrc = () => {
@@ -137,7 +110,7 @@ export default memo(
         imgUrl ||
         `https://picsum.photos/id/${getRandomNumberByRange(
           0,
-          1084,
+          1084
         )}/${width}/${height}`
       );
     };
@@ -145,18 +118,24 @@ export default memo(
     const createImg = (onload: VoidFunction) => {
       const img = new Image();
       img.crossOrigin = 'Anonymous';
-      img.onload = onload;
+
+      img.onload = () => {
+        typeof onImgLoadSuccess === 'function' && onImgLoadSuccess();
+        onload();
+      };
+
       img.onerror = () => {
-        (img as any).setSrc(getRandomImgSrc()); // 图片加载失败的时候重新加载其他图片
+        typeof onImgLoadError === 'function' && onImgLoadError();
+        // 重试加载
+        (img as any).setSrc(getRandomImgSrc());
       };
 
       (img as any).setSrc = (src: string) => {
         const isIE = window.navigator.userAgent.indexOf('Trident') > -1;
         if (isIE) {
-          // IE浏览器无法通过img.crossOrigin跨域，使用ajax获取图片blob然后转为dataURL显示
           const xhr = new XMLHttpRequest();
           xhr.onloadend = function (e: any) {
-            const file = new FileReader(); // FileReader仅支持IE10+
+            const file = new FileReader();
             file.readAsDataURL(e.target.response);
             file.onloadend = function (e) {
               img.src = e?.target?.result as string;
@@ -165,34 +144,37 @@ export default memo(
           xhr.open('GET', src);
           xhr.responseType = 'blob';
           xhr.send();
-        } else img.src = src;
+        } else {
+          img.src = src;
+        }
       };
 
-      (img as any).setSrc(getRandomImgSrc());
       return img;
     };
 
     const draw = (img: HTMLImageElement) => {
-      const canvasCtx = canvasRef.current.getContext('2d');
-      const blockCtx = blockRef.current.getContext('2d');
-      // 随机位置创建拼图形状
+      const canvasCtx = canvasRef.current?.getContext('2d');
+      const blockCtx = blockRef.current?.getContext('2d');
+      if (!canvasCtx || !blockCtx) return;
+
       xRef.current = getRandomNumberByRange(L + 10, width - (L + 10));
       yRef.current = getRandomNumberByRange(10 + r * 2, height - (L + 10));
+
       drawPath(canvasCtx, xRef.current, yRef.current, 'fill');
       drawPath(blockCtx, xRef.current, yRef.current, 'clip');
 
-      // 画入图片
       canvasCtx.drawImage(img, 0, 0, width, height);
       blockCtx.drawImage(img, 0, 0, width, height);
 
-      // 提取滑块并放到最左边
       const y1 = yRef.current - r * 2 - 1;
-      const ImageData = blockCtx.getImageData(xRef.current - 3, y1, L, L);
+      const imageData = blockCtx.getImageData(xRef.current - 3, y1, L, L);
       blockRef.current.width = L;
-      blockCtx.putImageData(ImageData, 0, y1);
+      blockCtx.putImageData(imageData, 0, y1);
     };
 
     const initImg = () => {
+      typeof onImgLoadStart === 'function' && onImgLoadStart();
+      setLoading(true);
       const img = createImg(() => {
         setLoading(false);
         draw(img);
@@ -201,21 +183,23 @@ export default memo(
     };
 
     const reset = () => {
-      const canvasCtx = canvasRef.current.getContext('2d');
-      const blockCtx = blockRef.current.getContext('2d');
-      // 重置样式
+      const canvasCtx = canvasRef.current?.getContext('2d');
+      const blockCtx = blockRef.current?.getContext('2d');
+      if (!canvasCtx || !blockCtx) return;
+
       setSliderLeft(0);
       setSliderClass('sliderContainer');
+      setTextTip(text);
       blockRef.current.width = width;
-      blockRef.current.style.left = 0 + 'px';
+      blockRef.current.style.left = '0px';
 
-      // 清空画布
       canvasCtx.clearRect(0, 0, width, height);
       blockCtx.clearRect(0, 0, width, height);
 
-      // 重新加载图片
+      // 触发加载开始
+      typeof onImgLoadStart === 'function' && onImgLoadStart();
       setLoading(true);
-      imgRef.current.setSrc(getRandomImgSrc());
+      imgRef.current?.setSrc?.(getRandomImgSrc());
     };
 
     const handleRefresh = () => {
@@ -224,55 +208,60 @@ export default memo(
     };
 
     const verify = () => {
-      const arr = trailRef.current; // 拖动时y轴的移动距离
-      const average = arr.reduce(sum) / arr.length;
+      const arr = trailRef.current;
+      const average = arr.length ? arr.reduce(sum) / arr.length : 0;
       const deviations = arr.map((x) => x - average);
-      const stddev = Math.sqrt(deviations.map(square).reduce(sum) / arr.length);
-      const left = parseInt(blockRef.current.style.left);
+      const stddev = arr.length
+        ? Math.sqrt(deviations.map(square).reduce(sum) / arr.length)
+        : 0;
+      const left = parseInt(blockRef.current.style.left || '0', 10);
       return {
         spliced: Math.abs(left - xRef.current) < 10,
-        verified: stddev !== 0, // 简单验证拖动轨迹，为零时表示Y轴上下没有波动，可能非人为操作
+        verified: stddev !== 0,
         left,
         destX: xRef.current,
       };
     };
 
-    const handleDragStart = function (e: any) {
-      originXRef.current = e.clientX || e.touches[0].clientX;
-      originYRef.current = e.clientY || e.touches[0].clientY;
+    const handleDragStart = (e: React.MouseEvent | React.TouchEvent) => {
+      const clientX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+      const clientY = 'touches' in e ? e.touches[0].clientY : e.clientY;
+      originXRef.current = clientX;
+      originYRef.current = clientY;
       isMouseDownRef.current = true;
     };
 
-    const handleDragMove = (e: any) => {
-      if (!isMouseDownRef.current) return false;
+    const handleDragMove = (e: React.MouseEvent | React.TouchEvent) => {
+      if (!isMouseDownRef.current) return;
       e.preventDefault();
-      const eventX = e.clientX || e.touches[0].clientX;
-      const eventY = e.clientY || e.touches[0].clientY;
+      const eventX = 'touches' in e ? e.touches[0].clientX : e.clientX;
+      const eventY = 'touches' in e ? e.touches[0].clientY : e.clientY;
       const moveX = eventX - originXRef.current;
       const moveY = eventY - originYRef.current;
-      if (moveX < 0 || moveX + 38 >= width) return false;
+
+      if (moveX < 0 || moveX + 38 >= width) return;
+
       setSliderLeft(moveX);
       const blockLeft = ((width - 40 - 20) / (width - 40)) * moveX;
       blockRef.current.style.left = blockLeft + 'px';
-
       setSliderClass('sliderContainer sliderContainer_active');
       trailRef.current.push(moveY);
-      onDraw && onDraw(blockLeft);
+      onDraw?.(blockLeft);
     };
 
-    const handleDragEnd = (e: any) => {
-      if (!isMouseDownRef.current) return false;
+    const handleDragEnd = (e: React.MouseEvent | React.TouchEvent) => {
+      if (!isMouseDownRef.current) return;
       isMouseDownRef.current = false;
-      const eventX = e.clientX || e.changedTouches[0].clientX;
-      if (eventX === originXRef.current) return false;
+      const eventX = 'changedTouches' in e ? e.changedTouches[0].clientX : e.clientX;
+      if (eventX === originXRef.current) return;
+
       setSliderClass('sliderContainer');
-      const { spliced, verified } = onCustomVertify
-        ? onCustomVertify(verify())
-        : verify();
-      if (spliced) {
-        if (verified) {
+      const result = onCustomVertify ? onCustomVertify(verify()) : verify();
+
+      if (result.spliced) {
+        if (result.verified) {
           setSliderClass('sliderContainer sliderContainer_success');
-          typeof onSuccess === 'function' && onSuccess();
+          onSuccess?.();
         } else {
           setSliderClass('sliderContainer sliderContainer_fail');
           setTextTip('请再试一次');
@@ -280,14 +269,18 @@ export default memo(
         }
       } else {
         setSliderClass('sliderContainer sliderContainer_fail');
-        typeof onFail === 'function' && onFail();
-        setTimeout(reset.bind(this), 1000);
+        onFail?.();
+        setTimeout(reset, 1000);
       }
     };
 
     useEffect(() => {
       if (visible) {
-        imgRef.current ? reset() : initImg();
+        if (imgRef.current) {
+          reset();
+        } else {
+          initImg();
+        }
       }
     }, [visible]);
 
@@ -295,9 +288,9 @@ export default memo(
       <div
         className="vertifyWrap"
         style={{
-          width: width + 'px',
+          width: `${width}px`,
           margin: '0 auto',
-          display: visible ? '' : 'none',
+          display: visible ? 'block' : 'none',
         }}
         onMouseMove={handleDragMove}
         onMouseUp={handleDragEnd}
@@ -305,7 +298,7 @@ export default memo(
         onTouchEnd={handleDragEnd}
       >
         <div className="canvasArea">
-          <canvas ref={canvasRef} width={width} height={height}></canvas>
+          <canvas ref={canvasRef} width={width} height={height} />
           <canvas
             ref={blockRef}
             className="block"
@@ -313,19 +306,19 @@ export default memo(
             height={height}
             onMouseDown={handleDragStart}
             onTouchStart={handleDragStart}
-          ></canvas>
+          />
         </div>
         <div
           className={sliderClass}
           style={{
             pointerEvents: isLoading ? 'none' : 'auto',
-            width: width + 'px',
+            width: `${width}px`,
           }}
         >
-          <div className="sliderMask" style={{ width: sliderLeft + 'px' }}>
+          <div className="sliderMask" style={{ width: `${sliderLeft}px` }}>
             <div
               className="slider"
-              style={{ left: sliderLeft + 'px' }}
+              style={{ left: `${sliderLeft}px` }}
               onMouseDown={handleDragStart}
               onTouchStart={handleDragStart}
             >
@@ -338,19 +331,19 @@ export default memo(
           className="refreshIcon"
           onClick={handleRefresh}
           style={{ backgroundImage: `url(${refreshIcon})` }}
-        ></div>
+        />
         <div
           className="loadingContainer"
           style={{
-            width: width + 'px',
-            height: height + 'px',
-            display: isLoading ? '' : 'none',
+            width: `${width}px`,
+            height: `${height}px`,
+            display: isLoading ? 'flex' : 'none',
           }}
         >
-          <div className="loadingIcon"></div>
+          <div className="loadingIcon" />
           <span>加载中...</span>
         </div>
       </div>
     );
-  },
+  }
 );
