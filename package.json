@@ -1,7 +1,7 @@
 {
-  "name": "@alex_xu/react-slider-vertify",
-  "version": "1.1.9",
-  "author": "alex_xu",
+  "name": "@zxz/zxz-react-slider-vertify",
+  "version": "1.2.0",
+  "author": "zxz",
   "description": "Slide verification component based on react",
   "keywords": [
     "slider-vertify",
@@ -28,7 +28,7 @@
     "test:coverage": "umi-test --coverage"
   },
   "contributors": [
-    "alex_xu"
+    "zxz"
   ],
   "files": [
     "dist",
