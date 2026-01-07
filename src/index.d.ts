@@ -56,6 +56,24 @@ export interface IVertifyProp {
    * @default       ():void => {}
    */
   onRefresh?: VoidFunction;
+
+  /**
+   * @description 图片开始加载时的回调
+   * @default () => {}
+   */
+  onImgLoadStart?: VoidFunction;
+
+  /**
+   * @description 图片加载成功的回调
+   * @default () => {}
+   */
+  onImgLoadSuccess?: VoidFunction;
+
+  /**
+   * @description 图片加载失败的回调（每次失败都会触发，包括重试）
+   * @default () => {}
+   */
+  onImgLoadError?: VoidFunction;
 }
 
 declare const Vertify: React.FC<IVertifyProp>;
